@@ -83,7 +83,7 @@ class Constructor:
         if node.pre_comment or node.inline_comment:
             # Don't store the default str tag when the value was implicitly
             # resolved to a different type (e.g., plain "5432" -> int).
-            stored_tag = node.tag
+            stored_tag: str | None = node.tag
             if (
                 stored_tag == "tag:yaml.org,2002:str"
                 and (node.style is None or node.style == "plain")
