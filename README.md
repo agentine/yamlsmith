@@ -1,8 +1,16 @@
 # yamlsmith
 
+[![PyPI](https://img.shields.io/pypi/v/yamlsmith)](https://pypi.org/project/yamlsmith/)
+[![Python](https://img.shields.io/pypi/pyversions/yamlsmith)](https://pypi.org/project/yamlsmith/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Round-trip YAML 1.2 library with comment preservation — a modern ruamel.yaml replacement.
 
 Pure Python, zero dependencies, fully typed (PEP 561).
+
+## Why yamlsmith?
+
+ruamel.yaml has 155M+ monthly downloads but is hosted on SourceForge/Mercurial with a single maintainer and a nearly impossible contribution model. yamlsmith is a drop-in replacement: pure Python, zero dependencies, YAML 1.2 only (no legacy boolean quirks), and fully type-annotated.
 
 ## Installation
 
@@ -46,13 +54,20 @@ text = dump_all([d1, d2])   # Dump multiple documents
 ```python
 from yamlsmith import YAML
 
-yaml = YAML(indent=2)
+yaml = YAML(indent=2, default_flow_style=False)
 
 data = yaml.load(text)
 yaml.dump(data, stream=file)
 docs = yaml.load_all(text)
 yaml.dump_all(docs, stream=file)
 ```
+
+**Constructor parameters:**
+
+| Parameter | Default | Description |
+|---|---|---|
+| `indent` | `2` | Indentation width for block sequences and mappings |
+| `default_flow_style` | `False` | Use flow style (`{a: 1}`) instead of block style by default |
 
 Streams can be `str`, `bytes`, or file-like objects.
 
