@@ -81,12 +81,21 @@ class Constructor:
 
         # Wrap in RoundTripScalar if there are comments.
         if node.pre_comment or node.inline_comment:
+            # Don't store the default str tag when the value was implicitly
+            # resolved to a different type (e.g., plain "5432" -> int).
+            stored_tag = node.tag
+            if (
+                stored_tag == "tag:yaml.org,2002:str"
+                and (node.style is None or node.style == "plain")
+                and not isinstance(result, str)
+            ):
+                stored_tag = None
             return RoundTripScalar(
                 result,
                 pre_comment=node.pre_comment,
                 inline_comment=node.inline_comment,
                 style=node.style,
-                tag=node.tag,
+                tag=stored_tag,
             )
         return result
 

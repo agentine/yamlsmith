@@ -202,6 +202,29 @@ class TestRoundTrip:
         result = dump(data)
         assert "# important" in result
 
+    def test_integer_with_comment_roundtrip(self) -> None:
+        original = "port: 5432  # db port\n"
+        data = load(original)
+        result = dump(data)
+        # Integer must not be quoted in output.
+        assert 'port: 5432' in result
+        assert '"5432"' not in result
+        assert "# db port" in result
+
+    def test_float_with_comment_roundtrip(self) -> None:
+        original = "rate: 3.14  # pi\n"
+        data = load(original)
+        result = dump(data)
+        assert 'rate: 3.14' in result
+        assert '"3.14"' not in result
+
+    def test_bool_with_comment_roundtrip(self) -> None:
+        original = "enabled: true  # flag\n"
+        data = load(original)
+        result = dump(data)
+        assert 'enabled: true' in result
+        assert '"true"' not in result
+
     def test_nested_roundtrip(self) -> None:
         original = "a:\n  b: 1\n  c: 2\n"
         data = load(original)
