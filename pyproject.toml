@@ -24,6 +24,7 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/agentine/yamlsmith"
 Repository = "https://github.com/agentine/yamlsmith"
+"Issue Tracker" = "https://github.com/agentine/yamlsmith/issues"
 
 [build-system]
 requires = ["hatchling"]
