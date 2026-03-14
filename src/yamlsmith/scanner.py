@@ -91,6 +91,15 @@ _ESCAPE_MAP: dict[str, str] = {
 }
 
 
+@dataclass
+class _SimpleKey:
+    """Tracking data for possible simple keys."""
+
+    token_index: int = 0
+    mark: Mark = field(default_factory=lambda: Mark(0, 0, 0))
+    column: int = 0
+
+
 class Scanner:
     """Stream-based YAML 1.2 tokenizer."""
 
@@ -106,10 +115,11 @@ class Scanner:
         self._indent: int = -1
         # Flow level (0 = block context).
         self._flow_level = 0
-        # Whether we've emitted a KEY token for the current key.
+        # Simple key tracking: when we see a scalar that might be a key,
+        # we record where it was in the token list. When we later see ':',
+        # we retroactively insert BLOCK_MAPPING_START before the key.
+        self._simple_key: _SimpleKey | None = None
         self._allow_simple_key = True
-        # Track whether we need to check for implicit keys.
-        self._possible_simple_key: dict[int, _SimpleKey] = {}
 
     # -- Public API --
 
@@ -159,16 +169,26 @@ class Scanner:
     def _at_end(self) -> bool:
         return self._index >= len(self._text)
 
+    # -- Simple key tracking --
+
+    def _save_simple_key(self) -> None:
+        """Mark the current token position as a possible simple key."""
+        if self._allow_simple_key:
+            self._simple_key = _SimpleKey(
+                token_index=len(self._tokens),
+                mark=self._mark(),
+                column=self._column,
+            )
+
+    def _remove_simple_key(self) -> None:
+        """Remove any saved simple key."""
+        self._simple_key = None
+
     # -- Whitespace / comment handling --
 
     def _skip_whitespace(self) -> None:
         """Skip spaces and tabs (not newlines)."""
         while not self._at_end() and self._peek() in (" ", "\t"):
-            self._advance()
-
-    def _skip_whitespace_and_newlines(self) -> None:
-        """Skip spaces, tabs, and newlines."""
-        while not self._at_end() and self._peek() in (" ", "\t", "\n", "\r"):
             self._advance()
 
     def _scan_to_next_token(self) -> None:
@@ -222,6 +242,7 @@ class Scanner:
 
         if self._at_end():
             self._unwind_indent(-1)
+            self._remove_simple_key()
             mark = self._mark()
             self._tokens.append(
                 Token(TokenType.STREAM_END, "", mark, mark)
@@ -233,7 +254,6 @@ class Scanner:
             self._unwind_indent(self._column)
 
         ch = self._peek()
-        ch2 = self._peek_chars(2)
         ch3 = self._peek_chars(3)
 
         # Document markers (only at column 0 in block context).
@@ -269,10 +289,11 @@ class Scanner:
         ):
             self._fetch_key()
             return
-        if ch2 == "? " or (
-            ch == "?"
-            and self._flow_level == 0
-            and self._peek(1) in ("\n", "\r", "")
+        if ch == "?" and self._flow_level == 0 and self._peek(1) in (
+            " ",
+            "\n",
+            "\r",
+            "",
         ):
             self._fetch_key()
             return
@@ -332,6 +353,8 @@ class Scanner:
 
     def _fetch_document_start(self) -> None:
         self._unwind_indent(-1)
+        self._remove_simple_key()
+        self._allow_simple_key = False
         start = self._mark()
         self._advance(3)
         self._tokens.append(
@@ -340,6 +363,8 @@ class Scanner:
 
     def _fetch_document_end(self) -> None:
         self._unwind_indent(-1)
+        self._remove_simple_key()
+        self._allow_simple_key = False
         start = self._mark()
         self._advance(3)
         self._tokens.append(
@@ -349,7 +374,9 @@ class Scanner:
     # -- Flow tokens --
 
     def _fetch_flow_mapping_start(self) -> None:
+        self._save_simple_key()
         self._flow_level += 1
+        self._allow_simple_key = True
         start = self._mark()
         self._advance()
         self._tokens.append(
@@ -357,7 +384,9 @@ class Scanner:
         )
 
     def _fetch_flow_mapping_end(self) -> None:
+        self._remove_simple_key()
         self._flow_level = max(0, self._flow_level - 1)
+        self._allow_simple_key = False
         start = self._mark()
         self._advance()
         self._tokens.append(
@@ -365,7 +394,9 @@ class Scanner:
         )
 
     def _fetch_flow_sequence_start(self) -> None:
+        self._save_simple_key()
         self._flow_level += 1
+        self._allow_simple_key = True
         start = self._mark()
         self._advance()
         self._tokens.append(
@@ -373,7 +404,9 @@ class Scanner:
         )
 
     def _fetch_flow_sequence_end(self) -> None:
+        self._remove_simple_key()
         self._flow_level = max(0, self._flow_level - 1)
+        self._allow_simple_key = False
         start = self._mark()
         self._advance()
         self._tokens.append(
@@ -381,6 +414,8 @@ class Scanner:
         )
 
     def _fetch_flow_entry(self) -> None:
+        self._remove_simple_key()
+        self._allow_simple_key = True
         start = self._mark()
         self._advance()
         self._tokens.append(
@@ -391,11 +426,13 @@ class Scanner:
 
     def _fetch_key(self) -> None:
         if self._flow_level == 0:
+            self._allow_simple_key = True
             if self._add_indent(self._column):
                 mark = self._mark()
                 self._tokens.append(
                     Token(TokenType.BLOCK_MAPPING_START, "", mark, mark)
                 )
+        self._remove_simple_key()
         start = self._mark()
         self._advance()
         self._tokens.append(
@@ -408,6 +445,8 @@ class Scanner:
             self._tokens.append(
                 Token(TokenType.BLOCK_SEQUENCE_START, "", mark, mark)
             )
+        self._remove_simple_key()
+        self._allow_simple_key = True
         start = self._mark()
         self._advance()
         self._tokens.append(
@@ -415,12 +454,29 @@ class Scanner:
         )
 
     def _fetch_value(self) -> None:
-        if self._flow_level == 0:
-            if self._add_indent(self._column):
-                mark = self._mark()
-                self._tokens.append(
-                    Token(TokenType.BLOCK_MAPPING_START, "", mark, mark)
-                )
+        # Check if this ':' follows a simple key (implicit key : value).
+        if self._simple_key is not None:
+            sk = self._simple_key
+            # Insert BLOCK_MAPPING_START before the key token.
+            if self._flow_level == 0:
+                if self._add_indent(sk.column):
+                    mapping_token = Token(
+                        TokenType.BLOCK_MAPPING_START,
+                        "",
+                        sk.mark,
+                        sk.mark,
+                    )
+                    self._tokens.insert(sk.token_index, mapping_token)
+            self._simple_key = None
+        else:
+            # No simple key: explicit value or block context.
+            if self._flow_level == 0:
+                if self._add_indent(self._column):
+                    mark = self._mark()
+                    self._tokens.append(
+                        Token(TokenType.BLOCK_MAPPING_START, "", mark, mark)
+                    )
+        self._allow_simple_key = self._flow_level == 0
         start = self._mark()
         self._advance()
         self._tokens.append(
@@ -430,6 +486,8 @@ class Scanner:
     # -- Anchor / Alias / Tag --
 
     def _fetch_anchor(self) -> None:
+        self._save_simple_key()
+        self._allow_simple_key = False
         start = self._mark()
         self._advance()  # skip &
         name = self._scan_anchor_name()
@@ -438,6 +496,8 @@ class Scanner:
         )
 
     def _fetch_alias(self) -> None:
+        self._save_simple_key()
+        self._allow_simple_key = False
         start = self._mark()
         self._advance()  # skip *
         name = self._scan_anchor_name()
@@ -471,6 +531,8 @@ class Scanner:
         return "".join(parts)
 
     def _fetch_tag(self) -> None:
+        self._save_simple_key()
+        self._allow_simple_key = False
         start = self._mark()
         self._advance()  # skip !
         tag_parts: list[str] = ["!"]
@@ -488,6 +550,8 @@ class Scanner:
     # -- Scalars --
 
     def _fetch_block_scalar(self, *, literal: bool) -> None:
+        self._remove_simple_key()
+        self._allow_simple_key = True
         start = self._mark()
         self._advance()  # skip | or >
         style = ScalarStyle.LITERAL if literal else ScalarStyle.FOLDED
@@ -597,13 +661,12 @@ class Scanner:
     def _chomp_block(
         self, lines: list[str], chomp: str, *, literal: bool
     ) -> str:
-        # Remove trailing empty lines for strip/clip.
         content_lines = list(lines)
 
         if literal:
             joined = "\n".join(content_lines)
         else:
-            # Folded: join non-empty lines with spaces, but preserve blank lines as newlines.
+            # Folded: join non-empty lines with spaces, preserve blank lines as newlines.
             parts: list[str] = []
             for line in content_lines:
                 if line == "":
@@ -615,18 +678,17 @@ class Scanner:
             joined = "".join(parts)
 
         if chomp == "-":
-            # Strip: remove all trailing newlines.
             joined = joined.rstrip("\n")
         elif chomp == "+":
-            # Keep: add final newline.
             joined = joined + "\n"
         else:
-            # Clip (default): single trailing newline.
             joined = joined.rstrip("\n") + "\n"
 
         return joined
 
     def _fetch_single_quoted_scalar(self) -> None:
+        self._save_simple_key()
+        self._allow_simple_key = False
         start = self._mark()
         self._advance()  # skip opening '
         parts: list[str] = []
@@ -645,8 +707,6 @@ class Scanner:
                     break
             elif ch == "\n":
                 self._advance()
-                # Fold newlines in single-quoted scalars.
-                # Skip leading whitespace on next line.
                 spaces = 0
                 while self._peek() == " ":
                     self._advance()
@@ -666,6 +726,8 @@ class Scanner:
         )
 
     def _fetch_double_quoted_scalar(self) -> None:
+        self._save_simple_key()
+        self._allow_simple_key = False
         start = self._mark()
         self._advance()  # skip opening "
         parts: list[str] = []
@@ -697,7 +759,6 @@ class Scanner:
                     code = self._advance(8)
                     parts.append(chr(int(code, 16)))
                 elif esc == "\n":
-                    # Line continuation.
                     self._advance()
                     while self._peek() in (" ", "\t"):
                         self._advance()
@@ -723,6 +784,8 @@ class Scanner:
         )
 
     def _fetch_plain_scalar(self) -> None:
+        self._save_simple_key()
+        self._allow_simple_key = False
         start = self._mark()
         parts: list[str] = []
         spaces: list[str] = []
@@ -770,7 +833,7 @@ class Scanner:
                     break
                 # Check for block indicators or document markers.
                 next_ch = self._peek()
-                if next_ch in ("#", "", ""):
+                if next_ch in ("#", ""):
                     self._index = saved.index
                     self._line = saved.line
                     self._column = saved.column
@@ -781,7 +844,7 @@ class Scanner:
                     self._line = saved.line
                     self._column = saved.column
                     break
-                if next_ch in ("-",) and self._peek(1) == " ":
+                if next_ch == "-" and self._peek(1) == " ":
                     self._index = saved.index
                     self._line = saved.line
                     self._column = saved.column
@@ -816,15 +879,6 @@ class Scanner:
                 style=ScalarStyle.PLAIN,
             )
         )
-
-
-@dataclass
-class _SimpleKey:
-    """Tracking data for possible simple keys."""
-
-    token_number: int = 0
-    required: bool = False
-    mark: Mark = field(default_factory=lambda: Mark(0, 0, 0))
 
 
 def scan(text: str) -> list[Token]:
