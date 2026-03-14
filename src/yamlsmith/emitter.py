@@ -7,18 +7,25 @@ from typing import TextIO
 
 from yamlsmith.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
-# Characters that require quoting in plain scalars.
+# Characters that require structural quoting in plain scalars.
 _PLAIN_UNSAFE_RE = re.compile(
     r"^[\-\?\:\,\[\]\{\}\#\&\*\!\|\>\'\"\%\@\`]"
     r"|[\:\#][ ]"
     r"|[ ][\#]"
-    r"|^(true|false|null|True|False|Null|TRUE|FALSE|NULL|~)$"
-    r"|^[-+]?[0-9]"
-    r"|^[-+]?\.[0-9]"
-    r"|^\.inf$|^\.nan$|^-\.inf$"
     r"|^\.$"
     r"|[\n\r]"
     r"|^$"
+)
+
+# Exact patterns for values that YAML resolves to non-string types.
+_YAML_TYPED_RE = re.compile(
+    r"^(true|false|null|True|False|Null|TRUE|FALSE|NULL|~)$"
+    r"|^[-+]?[0-9]+$"
+    r"|^0o[0-7]+$"
+    r"|^0x[0-9a-fA-F]+$"
+    r"|^[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?$"
+    r"|^[-+]?\.(inf|Inf|INF)$"
+    r"|^\.(nan|NaN|NAN)$"
 )
 
 
@@ -106,7 +113,7 @@ class Emitter:
         self, node: ScalarNode, level: int, *, is_key: bool
     ) -> None:
         # Pre-comment.
-        if node.pre_comment and not is_key:
+        if node.pre_comment:
             for line in node.pre_comment.split("\n"):
                 self._write_indent(level)
                 self._write(f"#{line}\n")
@@ -253,7 +260,11 @@ class Emitter:
         # Non-string typed scalars (int, float, bool, null) don't need quoting.
         if tag and tag != "tag:yaml.org,2002:str" and tag != "!!str":
             return False
-        return bool(_PLAIN_UNSAFE_RE.search(value))
+        if _PLAIN_UNSAFE_RE.search(value):
+            return True
+        if _YAML_TYPED_RE.match(value):
+            return True
+        return False
 
     @staticmethod
     def _escape_double(value: str) -> str:

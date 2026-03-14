@@ -226,7 +226,13 @@ class Parser:
 
         if tt == TokenType.SCALAR:
             t = self._advance()
-            inline = self._consume_comments()
+            # Only consume a comment as inline if on the same line as scalar
+            inline = None
+            next_tok = self._peek()
+            if (next_tok is not None
+                    and next_tok.type == TokenType.COMMENT
+                    and next_tok.start.line == t.end.line):
+                inline = self._advance().value
             self._events.append(
                 ScalarEvent(
                     value=t.value,
@@ -294,13 +300,13 @@ class Parser:
         )
 
         while self._peek_type() not in (TokenType.BLOCK_END, None):
-            self._consume_comments()
+            pre = self._consume_comments()
             if self._peek_type() == TokenType.BLOCK_END:
                 break
 
             if self._peek_type() == TokenType.KEY:
                 self._advance()
-                self._parse_node()
+                self._parse_node(pre_comment=pre)
                 if self._peek_type() == TokenType.VALUE:
                     self._advance()
                     self._parse_node()
@@ -311,7 +317,7 @@ class Parser:
                     )
             elif self._peek_type() == TokenType.SCALAR:
                 # Implicit key.
-                self._parse_node()
+                self._parse_node(pre_comment=pre)
                 if self._peek_type() == TokenType.VALUE:
                     self._advance()
                     self._parse_node()
@@ -323,7 +329,7 @@ class Parser:
             elif self._peek_type() == TokenType.VALUE:
                 # Empty key.
                 mark = self._peek_mark()
-                self._events.append(ScalarEvent(value="", mark=mark))
+                self._events.append(ScalarEvent(value="", pre_comment=pre, mark=mark))
                 self._advance()
                 self._parse_node()
             else:

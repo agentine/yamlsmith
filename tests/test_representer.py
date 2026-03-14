@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime
-import math
 
 from yamlsmith.nodes import MappingNode, ScalarNode, SequenceNode
 from yamlsmith.representer import Representer

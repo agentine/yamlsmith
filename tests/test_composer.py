@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from yamlsmith.composer import Composer, ComposerError, compose, compose_all
+from yamlsmith.composer import ComposerError, compose, compose_all
 from yamlsmith.nodes import MappingNode, ScalarNode, SequenceNode
 
 import pytest

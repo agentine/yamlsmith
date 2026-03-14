@@ -8,7 +8,6 @@ from yamlsmith.scanner import (
     Scanner,
     ScannerError,
     ScalarStyle,
-    Token,
     TokenType,
     scan,
 )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from yamlsmith.composer import compose, compose_all
+from yamlsmith.composer import compose
 from yamlsmith.emitter import Emitter, emit, emit_all
 from yamlsmith.nodes import MappingNode, ScalarNode, SequenceNode
 
