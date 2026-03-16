@@ -1,6 +1,6 @@
 [project]
 name = "yamlsmith"
-version = "0.1.0"
+version = "0.1.1"
 description = "Round-trip YAML 1.2 library with comment preservation — a modern ruamel.yaml replacement"
 readme = "README.md"
 license = "MIT"
